@@ -38,14 +38,48 @@ class StreamingRAG:
         Yields:
             Dictionary with type and data for each stage
         """
+        original_k = self.rag.k
         try:
             # Set number of documents if specified
             if num_docs is not None:
-                original_k = self.rag.k
                 self.rag.k = num_docs
 
+            requested_k = max(1, self.rag.k)
+
             # Step 1: Retrieve documents and send them without highlights
-            docs = self.rag.index.query(text=question, k=self.rag.k, filter=filter)
+            # First try requested k. If backend rejects it, use binary search to
+            # find the largest working k in [1, requested_k - 1].
+            docs = None
+            effective_k = requested_k
+            last_query_error = None
+
+            try:
+                docs = self.rag.index.query(text=question, k=requested_k, filter=filter)
+            except Exception as e:
+                last_query_error = e
+                low = 1
+                high = requested_k - 1
+
+                while low <= high:
+                    mid = (low + high) // 2
+                    try:
+                        candidate_docs = self.rag.index.query(
+                            text=question, k=mid, filter=filter
+                        )
+                        docs = candidate_docs
+                        effective_k = mid
+                        low = mid + 1
+                    except Exception as mid_error:
+                        last_query_error = mid_error
+                        high = mid - 1
+
+            if docs is None:
+                yield {
+                    "type": "error",
+                    "error": f"retrieval_failed(requested_k={requested_k}): {last_query_error}",
+                    "done": True,
+                }
+                return
 
             documents_without_highlights = [
                 DocumentWithHighlights(
@@ -60,6 +94,8 @@ class StreamingRAG:
 
             yield {
                 "type": "documents",
+                "requested_k": requested_k,
+                "effective_k": effective_k,
                 "data": [doc.model_dump() for doc in documents_without_highlights],
             }
 
@@ -109,6 +145,8 @@ class StreamingRAG:
 
             yield {
                 "type": "highlights",
+                "requested_k": requested_k,
+                "effective_k": effective_k,
                 "data": [d.model_dump() for d in interim_documents],
             }
 
@@ -143,12 +181,11 @@ class StreamingRAG:
 
             yield {"type": "answer", "data": result.model_dump(), "done": True}
 
-            # Restore original k value if we changed it
-            if num_docs is not None:
-                self.rag.k = original_k
-
         except Exception as e:
             yield {"type": "error", "error": str(e), "done": True}
+        finally:
+            # Always restore original k value to avoid cross-request side effects.
+            self.rag.k = original_k
 
     def stream_query_sync(
         self, question: str, num_docs: int = None, filter: Optional[str] = None

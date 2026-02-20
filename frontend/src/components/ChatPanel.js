@@ -11,7 +11,7 @@ import RelevantSentences from './RelevantSentences';
 
 const ChatPanel = () => {
   const { isLoading, isResourcesLoaded, currentQuery, submitQuery, error } = useApi();
-  const { setSelectedDocId } = useDocuments();
+  const { setSelectedDocId, selectedDocId } = useDocuments();
   const [selectedHighlight, setSelectedHighlight] = useState(null);
   const messagesEndRef = useRef(null);
   const answerRef = useRef(null);
@@ -98,7 +98,10 @@ const ChatPanel = () => {
                   docIndex: citation.doc_index
                 };
                 setSelectedHighlight(highlight);
-                setSelectedDocId({ docIndex: citation.doc_index });
+                setSelectedDocId({
+                  docIndex: citation.doc_index,
+                  highlightIndex: citation.highlight_index,
+                });
               }
             }
           });
@@ -115,6 +118,25 @@ const ChatPanel = () => {
       }
     };
   }, [currentQuery, selectedHighlight, setSelectedDocId]);
+
+  useEffect(() => {
+    if (!currentQuery || !selectedDocId) {
+      return;
+    }
+
+    const doc = currentQuery.documents?.[selectedDocId.docIndex];
+    const idx = selectedDocId.highlightIndex;
+    if (!doc || idx === undefined || idx === null || !doc.highlights?.[idx]) {
+      return;
+    }
+
+    const highlight = {
+      ...doc.highlights[idx],
+      docIndex: selectedDocId.docIndex,
+      highlightIndex: idx,
+    };
+    setSelectedHighlight(highlight);
+  }, [currentQuery, selectedDocId]);
   
   const handleSubmit = async (question) => {
     if (!question.trim() || !isResourcesLoaded) return;
@@ -134,7 +156,10 @@ const ChatPanel = () => {
           // Add document index to each highlight for reference
           allHighlights.push({
             ...highlight,
-            docIndex
+            docIndex,
+            highlightIndex: doc.highlights.findIndex(
+              h => h.start === highlight.start && h.end === highlight.end && h.text === highlight.text
+            )
           });
         });
       }
@@ -150,7 +175,7 @@ const ChatPanel = () => {
   // Handle highlight selection
   const handleHighlightClick = (highlight) => {
     setSelectedHighlight(highlight === selectedHighlight ? null : highlight);
-    setSelectedDocId({ docIndex: highlight.docIndex });
+    setSelectedDocId({ docIndex: highlight.docIndex, highlightIndex: highlight.highlightIndex });
   };
   
   return (
@@ -222,7 +247,15 @@ const ChatPanel = () => {
               />
               
               {/* Assistant response */}
-              {currentQuery.answer ? (
+              {currentQuery.streamError ? (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start space-x-2">
+                  <FaExclamationTriangle className="w-4 h-4 text-red-600 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-red-700">Streaming query failed</p>
+                    <p className="text-xs text-red-700 break-words">{currentQuery.streamError}</p>
+                  </div>
+                </div>
+              ) : currentQuery.answer ? (
                 <div className="space-y-4">
                   <ChatMessage 
                     message={currentQuery.answer} 
@@ -238,6 +271,7 @@ const ChatPanel = () => {
                       highlights={getAllHighlights()}
                       onHighlightClick={handleHighlightClick}
                       selectedHighlight={selectedHighlight}
+                      selectedDocId={selectedDocId}
                       currentQuery={currentQuery}
                     />
                   </div>

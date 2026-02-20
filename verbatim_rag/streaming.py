@@ -38,14 +38,68 @@ class StreamingRAG:
         Yields:
             Dictionary with type and data for each stage
         """
+        original_k = self.rag.k
         try:
             # Set number of documents if specified
             if num_docs is not None:
-                original_k = self.rag.k
                 self.rag.k = num_docs
 
+            requested_k = max(1, self.rag.k)
+
             # Step 1: Retrieve documents and send them without highlights
-            docs = self.rag.index.query(text=question, k=self.rag.k, filter=filter)
+            # Try requested k first. On failure, use binary search for efficiency,
+            # then a linear safety sweep so non-monotonic/transient failures still
+            # have a chance to recover at another k.
+            docs = None
+            effective_k = requested_k
+            last_query_error = None
+
+            attempted_ks: list[int] = []
+
+            def _try_query(candidate_k: int):
+                nonlocal docs, effective_k, last_query_error
+                attempted_ks.append(candidate_k)
+                try:
+                    candidate_docs = self.rag.index.query(
+                        text=question, k=candidate_k, filter=filter
+                    )
+                    docs = candidate_docs
+                    effective_k = candidate_k
+                    return True
+                except Exception as query_error:
+                    last_query_error = query_error
+                    return False
+
+            # 1) Direct attempt at requested k
+            if not _try_query(requested_k):
+                # 2) Efficient search for highest plausible working k
+                low = 1
+                high = requested_k - 1
+                while low <= high and docs is None:
+                    mid = (low + high) // 2
+                    if _try_query(mid):
+                        low = mid + 1
+                    else:
+                        high = mid - 1
+
+                # 3) Safety sweep for non-monotonic/transient failures
+                if docs is None:
+                    for candidate_k in range(requested_k - 1, 0, -1):
+                        if candidate_k in attempted_ks:
+                            continue
+                        if _try_query(candidate_k):
+                            break
+
+            if docs is None:
+                yield {
+                    "type": "error",
+                    "error": (
+                        f"retrieval_failed(requested_k={requested_k}, "
+                        f"attempted_ks={attempted_ks}): {last_query_error}"
+                    ),
+                    "done": True,
+                }
+                return
 
             documents_without_highlights = [
                 DocumentWithHighlights(
@@ -60,6 +114,8 @@ class StreamingRAG:
 
             yield {
                 "type": "documents",
+                "requested_k": requested_k,
+                "effective_k": effective_k,
                 "data": [doc.model_dump() for doc in documents_without_highlights],
             }
 
@@ -109,6 +165,8 @@ class StreamingRAG:
 
             yield {
                 "type": "highlights",
+                "requested_k": requested_k,
+                "effective_k": effective_k,
                 "data": [d.model_dump() for d in interim_documents],
             }
 
@@ -143,12 +201,11 @@ class StreamingRAG:
 
             yield {"type": "answer", "data": result.model_dump(), "done": True}
 
-            # Restore original k value if we changed it
-            if num_docs is not None:
-                self.rag.k = original_k
-
         except Exception as e:
             yield {"type": "error", "error": str(e), "done": True}
+        finally:
+            # Always restore original k value to avoid cross-request side effects.
+            self.rag.k = original_k
 
     def stream_query_sync(
         self, question: str, num_docs: int = None, filter: Optional[str] = None

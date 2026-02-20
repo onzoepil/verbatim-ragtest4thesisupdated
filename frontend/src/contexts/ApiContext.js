@@ -76,7 +76,12 @@ export const ApiProvider = ({ children }) => {
       });
       
       if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+        const msg = `Server responded with ${response.status}: ${response.statusText}`;
+        setCurrentQuery(prev => ({
+          ...prev,
+          streamError: msg,
+        }));
+        throw new Error(msg);
       }
       
       const reader = response.body.getReader();
@@ -179,6 +184,12 @@ export const ApiProvider = ({ children }) => {
           } catch (parseError) {
             console.error('Error parsing response:', parseError);
             console.error('Raw line:', line);
+            const parseMsg = `stream_parse_error: ${parseError?.message || parseError}`;
+            setError(parseMsg);
+            setCurrentQuery(prev => ({
+              ...prev,
+              streamError: parseMsg,
+            }));
           }
         }
       }
@@ -201,12 +212,28 @@ export const ApiProvider = ({ children }) => {
           }
           
           // Process final data if needed
+          if (data.type === 'error' || data.error) {
+            const finalMsg = data.error || 'Unknown streaming error';
+            setError(finalMsg);
+            setCurrentQuery(prev => ({
+              ...prev,
+              streamError: finalMsg,
+            }));
+            setIsLoading(false);
+          }
+
           if (data.type === 'answer' && data.done) {
             setIsLoading(false);
           }
         } catch (parseError) {
           console.error('Error parsing final buffer:', parseError);
           console.error('Raw buffer:', buffer);
+          const finalParseMsg = `stream_parse_error(final): ${parseError?.message || parseError}`;
+          setError(finalParseMsg);
+          setCurrentQuery(prev => ({
+            ...prev,
+            streamError: finalParseMsg,
+          }));
         }
       }
       

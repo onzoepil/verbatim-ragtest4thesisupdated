@@ -47,48 +47,21 @@ class StreamingRAG:
             requested_k = max(1, self.rag.k)
 
             # Step 1: Retrieve documents and send them without highlights
-            # Try requested k first. On failure, use binary search for efficiency,
-            # then a linear safety sweep so non-monotonic/transient failures still
-            # have a chance to recover at another k.
+            # Keep fallback logic simple and deterministic: try requested k first,
+            # then decrement one-by-one until a query succeeds.
             docs = None
             effective_k = requested_k
             last_query_error = None
-
             attempted_ks: list[int] = []
 
-            def _try_query(candidate_k: int):
-                nonlocal docs, effective_k, last_query_error
+            for candidate_k in range(requested_k, 0, -1):
                 attempted_ks.append(candidate_k)
                 try:
-                    candidate_docs = self.rag.index.query(
-                        text=question, k=candidate_k, filter=filter
-                    )
-                    docs = candidate_docs
+                    docs = self.rag.index.query(text=question, k=candidate_k, filter=filter)
                     effective_k = candidate_k
-                    return True
+                    break
                 except Exception as query_error:
                     last_query_error = query_error
-                    return False
-
-            # 1) Direct attempt at requested k
-            if not _try_query(requested_k):
-                # 2) Efficient search for highest plausible working k
-                low = 1
-                high = requested_k - 1
-                while low <= high and docs is None:
-                    mid = (low + high) // 2
-                    if _try_query(mid):
-                        low = mid + 1
-                    else:
-                        high = mid - 1
-
-                # 3) Safety sweep for non-monotonic/transient failures
-                if docs is None:
-                    for candidate_k in range(requested_k - 1, 0, -1):
-                        if candidate_k in attempted_ks:
-                            continue
-                        if _try_query(candidate_k):
-                            break
 
             if docs is None:
                 yield {

@@ -47,36 +47,29 @@ class StreamingRAG:
             requested_k = max(1, self.rag.k)
 
             # Step 1: Retrieve documents and send them without highlights
-            # First try requested k. If backend rejects it, use binary search to
-            # find the largest working k in [1, requested_k - 1].
+            # Keep fallback logic simple and deterministic: try requested k first,
+            # then decrement one-by-one until a query succeeds.
             docs = None
             effective_k = requested_k
             last_query_error = None
+            attempted_ks: list[int] = []
 
-            try:
-                docs = self.rag.index.query(text=question, k=requested_k, filter=filter)
-            except Exception as e:
-                last_query_error = e
-                low = 1
-                high = requested_k - 1
-
-                while low <= high:
-                    mid = (low + high) // 2
-                    try:
-                        candidate_docs = self.rag.index.query(
-                            text=question, k=mid, filter=filter
-                        )
-                        docs = candidate_docs
-                        effective_k = mid
-                        low = mid + 1
-                    except Exception as mid_error:
-                        last_query_error = mid_error
-                        high = mid - 1
+            for candidate_k in range(requested_k, 0, -1):
+                attempted_ks.append(candidate_k)
+                try:
+                    docs = self.rag.index.query(text=question, k=candidate_k, filter=filter)
+                    effective_k = candidate_k
+                    break
+                except Exception as query_error:
+                    last_query_error = query_error
 
             if docs is None:
                 yield {
                     "type": "error",
-                    "error": f"retrieval_failed(requested_k={requested_k}): {last_query_error}",
+                    "error": (
+                        f"retrieval_failed(requested_k={requested_k}, "
+                        f"attempted_ks={attempted_ks}): {last_query_error}"
+                    ),
                     "done": True,
                 }
                 return

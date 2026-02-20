@@ -55,6 +55,7 @@ export const ApiProvider = ({ children }) => {
       documents: [],
       answer: null,
       structured_answer: null,
+      streamError: null,
       requestedK: null,
       effectiveK: null
     });
@@ -116,6 +117,11 @@ export const ApiProvider = ({ children }) => {
             
             if (data.error) {
               setError(data.error);
+              setCurrentQuery(prev => ({
+                ...prev,
+                streamError: data.error,
+              }));
+              setIsLoading(false);
               continue;
             }
             

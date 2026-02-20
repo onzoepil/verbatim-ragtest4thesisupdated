@@ -247,7 +247,15 @@ const ChatPanel = () => {
               />
               
               {/* Assistant response */}
-              {currentQuery.answer ? (
+              {currentQuery.streamError ? (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start space-x-2">
+                  <FaExclamationTriangle className="w-4 h-4 text-red-600 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-red-700">Streaming query failed</p>
+                    <p className="text-xs text-red-700 break-words">{currentQuery.streamError}</p>
+                  </div>
+                </div>
+              ) : currentQuery.answer ? (
                 <div className="space-y-4">
                   <ChatMessage 
                     message={currentQuery.answer} 

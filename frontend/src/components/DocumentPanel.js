@@ -12,7 +12,7 @@ import DocumentViewer from './DocumentViewer';
 import DocumentSelector from './DocumentSelector';
 
 const DocumentPanel = ({ onBack }) => {
-  const { isLoading, currentQuery } = useApi();
+  const { isLoading, currentQuery, numDocs } = useApi();
   const { selectedDocId, setSelectedDocId } = useDocuments();
   const [searchText, setSearchText] = useState('');
   
@@ -46,6 +46,16 @@ const DocumentPanel = ({ onBack }) => {
       setSelectedDocId({ docIndex: newIndex });
     }
   };
+
+  const fallbackApplied =
+    currentQuery?.effectiveK !== null &&
+    currentQuery?.effectiveK !== undefined &&
+    currentQuery?.requestedK !== null &&
+    currentQuery?.requestedK !== undefined &&
+    currentQuery.effectiveK < currentQuery.requestedK;
+
+  const requestedK = currentQuery?.requestedK ?? numDocs;
+  const effectiveK = currentQuery?.effectiveK;
   
   return (
     <Card className="h-full flex flex-col">
@@ -66,6 +76,12 @@ const DocumentPanel = ({ onBack }) => {
             <FaFileAlt className="w-5 h-5 text-primary-600" />
             <span>Source Documents</span>
           </CardTitle>
+
+          {fallbackApplied && (
+            <Badge variant="warning" className="ml-2" title="Backend reduced retrieval depth to avoid a retrieval error.">
+              Retrieved {effectiveK} / requested {requestedK}
+            </Badge>
+          )}
           
           {/* Document navigation */}
           {currentQuery?.documents && currentQuery.documents.length > 0 && selectedDocId && (

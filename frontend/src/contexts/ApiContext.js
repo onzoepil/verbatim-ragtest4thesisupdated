@@ -54,7 +54,9 @@ export const ApiProvider = ({ children }) => {
       question,
       documents: [],
       answer: null,
-      structured_answer: null
+      structured_answer: null,
+      requestedK: null,
+      effectiveK: null
     });
     
     try {
@@ -122,7 +124,9 @@ export const ApiProvider = ({ children }) => {
                 // Update documents incrementally
                 setCurrentQuery(prev => ({
                   ...prev,
-                  documents: data.data
+                  documents: data.data,
+                  requestedK: data.requested_k ?? prev?.requestedK ?? null,
+                  effectiveK: data.effective_k ?? prev?.effectiveK ?? null
                 }));
                 break;
                 
@@ -143,7 +147,9 @@ export const ApiProvider = ({ children }) => {
                   
                   return {
                     ...prev,
-                    documents: updatedDocs
+                    documents: updatedDocs,
+                    requestedK: data.requested_k ?? prev?.requestedK ?? null,
+                    effectiveK: data.effective_k ?? prev?.effectiveK ?? null
                   };
                 });
                 break;

@@ -34,8 +34,22 @@ const DocumentPanel = ({ onBack }) => {
       }
     : document;
 
+  const citationNumbersByHighlightIndex = {};
+  if (currentQuery?.structured_answer?.citations && selectedDocId?.docIndex !== undefined && document?.highlights) {
+    currentQuery.structured_answer.citations.forEach((citation, index) => {
+      if (citation.doc_index === selectedDocId.docIndex) {
+        citationNumbersByHighlightIndex[citation.highlight_index] = index + 1;
+      }
+    });
+  }
+
   const handleDocumentSelect = (docIndex) => {
     setSelectedDocId({ docIndex });
+  };
+
+  const handleInlineHighlightClick = ({ docIndex, highlightIndex }) => {
+    if (docIndex === undefined || highlightIndex === undefined) return;
+    setSelectedDocId({ docIndex, highlightIndex });
   };
 
   const navigateDocument = (direction) => {
@@ -267,6 +281,9 @@ const DocumentPanel = ({ onBack }) => {
               <DocumentViewer 
                 document={filteredDocument} 
                 selectedHighlightIndex={selectedDocId?.highlightIndex}
+                selectedDocIndex={selectedDocId?.docIndex}
+                citationNumbersByHighlightIndex={citationNumbersByHighlightIndex}
+                onDocumentHighlightClick={handleInlineHighlightClick}
                 isLoading={isLoading}
               />
             </motion.div>

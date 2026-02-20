@@ -10,6 +10,7 @@ const RelevantSentences = ({
   highlights = [], 
   onHighlightClick, 
   selectedHighlight,
+  selectedDocId,
   currentQuery 
 }) => {
   const [searchText, setSearchText] = useState('');
@@ -90,7 +91,10 @@ const RelevantSentences = ({
               ) : (
                 filteredHighlights.map((highlight, idx) => {
                   const citationIndex = getCitationIndex(highlight);
-                  const isSelected = selectedHighlight === highlight;
+                  const isSelected =
+                    (selectedDocId?.docIndex === highlight.docIndex &&
+                      selectedDocId?.highlightIndex === highlight.highlightIndex) ||
+                    selectedHighlight === highlight;
                   
                   return (
                     <motion.div

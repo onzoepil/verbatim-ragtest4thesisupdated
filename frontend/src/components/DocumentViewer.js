@@ -7,7 +7,14 @@ import { Card, CardContent } from './ui/Card';
 import { Spinner } from './ui/Spinner';
 import { cn } from '../utils/cn';
 
-const DocumentViewer = ({ document: docData, selectedHighlightIndex, isLoading }) => {
+const DocumentViewer = ({
+  document: docData,
+  selectedHighlightIndex,
+  selectedDocIndex,
+  citationNumbersByHighlightIndex = {},
+  onDocumentHighlightClick,
+  isLoading,
+}) => {
   const contentRef = useRef(null);
   const highlightRefs = useRef([]);
   const [showFullContent, setShowFullContent] = useState(false);
@@ -42,10 +49,14 @@ const DocumentViewer = ({ document: docData, selectedHighlightIndex, isLoading }
       const isSelected = index === selectedHighlightIndex;
       const className = isSelected ? 'bg-blue-100 border-l-2 border-blue-400 shadow-sm' : 'bg-blue-50 border-b border-blue-300';
       
+      const citationNum = citationNumbersByHighlightIndex?.[index];
+      const title = citationNum ? `Citation [${citationNum}]` : 'Highlighted passage';
+
       html += `<mark 
         id="highlight-${index}" 
         class="highlight ${isSelected ? 'selected' : ''} ${className} px-1 py-0.5 rounded-sm transition-all duration-200" 
         data-index="${index}"
+        title="${title}"
       >${highlight.text}</mark>`;
       
       // Update the last index
@@ -57,6 +68,16 @@ const DocumentViewer = ({ document: docData, selectedHighlightIndex, isLoading }
     
     // Set the HTML content
     contentRef.current.innerHTML = html;
+
+    // Clicking a highlight in the document syncs selection back to citations.
+    contentRef.current.onclick = (event) => {
+      const mark = event.target.closest('mark.highlight');
+      if (!mark || !onDocumentHighlightClick) return;
+      const idx = Number(mark.getAttribute('data-index'));
+      if (!Number.isNaN(idx)) {
+        onDocumentHighlightClick({ docIndex: selectedDocIndex, highlightIndex: idx });
+      }
+    };
     // Enhance any tables for better readability & horizontal scroll + mobile stacking
   const enhanceTables = () => {
       const root = contentRef.current;
@@ -132,7 +153,13 @@ const DocumentViewer = ({ document: docData, selectedHighlightIndex, isLoading }
         }
       }, 100);
     }
-  }, [docData, selectedHighlightIndex]);
+  }, [
+    docData,
+    selectedHighlightIndex,
+    selectedDocIndex,
+    citationNumbersByHighlightIndex,
+    onDocumentHighlightClick,
+  ]);
   
   if (!docData) {
     return (

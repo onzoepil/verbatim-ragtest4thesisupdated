@@ -12,7 +12,6 @@ from .models import (
 from .core import VerbatimRAG
 
 
-
 class StreamingRAG:
     """
     Streaming wrapper for VerbatimRAG that provides step-by-step processing
@@ -44,32 +43,43 @@ class StreamingRAG:
             if num_docs is not None:
                 self.rag.k = num_docs
 
-            requested_k = max(1, self.rag.k)
-
             # Step 1: Retrieve documents and send them without highlights
-            # Keep fallback logic simple and deterministic: try requested k first,
-            # then decrement one-by-one until a query succeeds.
+            # Some backends can fail if k is too large for the current collection;
+            # if that happens, reduce k progressively until query succeeds.
             docs = None
-            effective_k = requested_k
             last_query_error = None
-            attempted_ks: list[int] = []
-
-            for candidate_k in range(requested_k, 0, -1):
-                attempted_ks.append(candidate_k)
+            for candidate_k in range(max(1, self.rag.k), 0, -1):
                 try:
                     docs = self.rag.index.query(text=question, k=candidate_k, filter=filter)
-                    effective_k = candidate_k
                     break
-                except Exception as query_error:
-                    last_query_error = query_error
+                except Exception as e:
+                    last_query_error = e
 
             if docs is None:
                 yield {
                     "type": "error",
-                    "error": (
-                        f"retrieval_failed(requested_k={requested_k}, "
-                        f"attempted_ks={attempted_ks}): {last_query_error}"
-                    ),
+                    "error": f"retrieval_failed: {last_query_error}",
+                    "done": True,
+                }
+                return
+
+            valid_docs = [
+                doc
+                for doc in docs
+                if isinstance(getattr(doc, "text", None), str) and doc.text.strip()
+            ]
+            dropped_docs = len(docs) - len(valid_docs)
+            if dropped_docs > 0:
+                yield {
+                    "type": "progress",
+                    "stage": "dropped_empty_documents",
+                    "count": dropped_docs,
+                }
+
+            if not valid_docs:
+                yield {
+                    "type": "error",
+                    "error": "retrieval_failed: all retrieved documents were empty",
                     "done": True,
                 }
                 return
@@ -82,13 +92,11 @@ class StreamingRAG:
                     source=doc.metadata.get("source", ""),
                     metadata=doc.metadata,
                 )
-                for doc in docs
+                for doc in valid_docs
             ]
 
             yield {
                 "type": "documents",
-                "requested_k": requested_k,
-                "effective_k": effective_k,
                 "data": [doc.model_dump() for doc in documents_without_highlights],
             }
 
@@ -97,7 +105,7 @@ class StreamingRAG:
             extraction_start = time.time()
             try:
                 relevant_spans = await asyncio.to_thread(
-                    self.rag.extractor.extract_spans, question, docs
+                    self.rag.extractor.extract_spans, question, valid_docs
                 )
             except Exception as e:
                 yield {
@@ -105,9 +113,6 @@ class StreamingRAG:
                     "error": f"span_extraction_failed: {e}",
                     "done": True,
                 }
-                # Restore k if needed
-                if num_docs is not None:
-                    self.rag.k = original_k
                 return
             extraction_duration = time.time() - extraction_start
 
@@ -117,7 +122,7 @@ class StreamingRAG:
                 "elapsed_ms": int(extraction_duration * 1000),
             }
             interim_documents = []
-            for doc in docs:
+            for doc in valid_docs:
                 doc_content = doc.text
                 doc_spans = relevant_spans.get(doc_content, [])
                 if doc_spans:
@@ -138,8 +143,6 @@ class StreamingRAG:
 
             yield {
                 "type": "highlights",
-                "requested_k": requested_k,
-                "effective_k": effective_k,
                 "data": [d.model_dump() for d in interim_documents],
             }
 
@@ -161,13 +164,11 @@ class StreamingRAG:
                     "error": f"template_processing_failed: {e}",
                     "done": True,
                 }
-                if num_docs is not None:
-                    self.rag.k = original_k
                 return
             result = self.rag.response_builder.build_response(
                 question=question,
                 answer=answer,
-                search_results=docs,
+                search_results=valid_docs,
                 relevant_spans=relevant_spans,
                 display_span_count=len(display_spans),
             )
@@ -177,7 +178,7 @@ class StreamingRAG:
         except Exception as e:
             yield {"type": "error", "error": str(e), "done": True}
         finally:
-            # Always restore original k value to avoid cross-request side effects.
+            # Restore original k value even for early returns/errors
             self.rag.k = original_k
 
     def stream_query_sync(
